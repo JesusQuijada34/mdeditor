@@ -1,109 +1,67 @@
-# Editor de Texto Avanzado con Markdown
+# Editor Markdown Avanzado
 
-![Editor de Texto](assets/screenshots/screenshot-1.png)
-
----
-## Descripción
-
-Un editor de texto moderno y multiplataforma con soporte para Markdown, diseñado para funcionar tanto en Windows como en Linux. Combina las funcionalidades de un editor de texto avanzado con la simplicidad del formato Markdown, incluyendo una vista previa en tiempo real.
+> Un editor de Markdown bello y moderno hecho con PyQt5.
+>
+> **Vista previa en vivo.**  
+> **Interfaz inspirada y cuidada.**  
+> **Soporte para tablas, código, impresión y más.**
 
 ---
 
 ## Características principales
 
-✅ **Interfaz tipo Word 365** con barras de herramientas organizadas  
-✅ **Soporte completo para Markdown** con vista previa en tiempo real  
-✅ **Formato de texto avanzado**: negritas, cursivas, encabezados, listas  
-✅ **Multiplataforma**: Funciona en Windows y Linux  
-✅ **Contador de palabras y caracteres**  
-✅ **Sistema de archivos completo**: nuevo, abrir, guardar, guardar como  
-✅ **Impresión de documentos**  
-✅ **Diseño personalizable** con estilos QSS  
+- **Vista previa estilizada** en tiempo real del Markdown.
+- **Contador de palabras y caracteres.**
+- **Botones rápidos**: Nuevo, Abrir, Guardar, Guardar Como, Imprimir, Acerca de.
+- **Diseño atractivo** con esquemas de color modernos.
+- **Soporte extendido** para tablas, bloques de código, resaltado, enlaces y más.
+- Diálogo para **Acerca de** integrado.
+- **Atajos de teclado** estándar por el sistema operativo.
+- **Corrección de errores** frecuentes y mejoras continuas basadas en feedback.
 
 ---
 
-## Requisitos del sistema
+## Uso rápido
 
-- Python 3.7 o superior
-- Sistemas soportados:
-  - Windows 10/11
-  - Linux (Ubuntu, Fedora, etc.)
+1. Asegúrate de tener **Python >=3.6** y **PyQt5** y **markdown** instalados:
 
----
-
-## Instalación
-
-1. Clona el repositorio:
    ```bash
-   git clone https://github.com/tu-usuario/markdown-editor.git
-   cd markdown-editor
+   pip install PyQt5 markdown
    ```
 
-2. Crea y activa un entorno virtual (recomendado):
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # Linux/macOS
-   venv\Scripts\activate     # Windows
-   ```
+2. Descarga los archivos (`mdeditor.py` y la carpeta `app` con el ícono opcional).
 
-3. Instala las dependencias:
+3. Ejecuta:
+
    ```bash
-   pip install -r requirements.txt
+   python mdeditor.py
    ```
 
 ---
 
-## Uso
+## Archivos
 
-Ejecuta la aplicación con:
-```bash
-python dpad.py
-```
+- `mdeditor.py` — código fuente principal del editor.
+- `app/app-icon.ico` — ícono usado en la ventana (opcional).
 
 ---
 
-### Atajos de teclado importantes
+## Captura de pantalla
 
-| Combinación | Acción |
-|------------|--------|
-| Ctrl+N | Nuevo documento |
-| Ctrl+O | Abrir documento |
-| Ctrl+S | Guardar |
-| Ctrl+Shift+S | Guardar como |
-| Ctrl+P | Imprimir |
-| Ctrl+B | Negrita |
-| Ctrl+I | Cursiva |
-| Ctrl+U | Subrayado |
-| Ctrl+1/2/3 | Encabezado 1/2/3 |
-| F9 | Mostrar/ocultar vista previa |
+![Editor Markdown Avanzado screenshot](./screenshot.png)
 
 ---
 
-## Capturas de pantalla
+## Créditos
 
-*[Incluir aquí 2-3 capturas de pantalla mostrando:*
-1. *La interfaz principal con el editor y vista previa*
-2. *El menú de formato en acción*
-3. *El diálogo de guardar archivo]*
+Desarrollado con 🧡 usando [PyQt5](https://riverbankcomputing.com/software/pyqt/).
 
 ---
 
-## Roadmap
+## Historial y corrección de errores
 
-- [ ] Añadir resaltado de sintaxis Markdown
-- [ ] Implementar temas oscuros/claros
-- [ ] Añadir soporte para tablas
-- [ ] Implementar exportación a PDF
-- [ ] Añadir sistema de plugins
+- Versión actual: varias correcciones de bugs menores de formato y estabilidad.
+- Cada versión incorpora revisiones basadas en reportes de usuarios y pruebas manuales.
 
 ---
 
-## Contribución
-
-Las contribuciones son bienvenidas. Por favor, abre un issue primero para discutir los cambios propuestos.
-
----
-
-## Licencia
-
-Este proyecto está licenciado bajo la Licencia GNU - ver el archivo [LICENSE](LICENSE) para más detalles.
