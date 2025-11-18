@@ -1,531 +1,320 @@
-# GitHub Copilot
-# Updated updater.py: better error handling, performance, cross-platform installer generator,
-# background worker for network I/O, Windows "acrylic" attempt, custom titlebar with SVG system buttons.
-
-import sys
-import os
-import tempfile
-import threading
-import time
-import traceback
-import shutil
-import subprocess
-import uuid
-import xml.etree.ElementTree as ET
+import sys, os, requests, shutil, subprocess, xml.etree.ElementTree as ET
+import threading, time, traceback
 from datetime import datetime
+from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout
+from PyQt5.QtGui import QFont, QIcon, QPixmap
+from PyQt5.QtCore import Qt, QThread, QObject, pyqtSignal
+# La clase InstallerWorker se integrará a continuación
 
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtGui import QFont, QPainter, QColor, QBrush, QIcon, QPixmap
-from PyQt5.QtWidgets import (
-    QApplication, QWidget, QLabel, QPushButton, QVBoxLayout, QMessageBox,
-    QHBoxLayout, QFrame
-)
-
-# Config
 XML_PATH = "details.xml"
 LOG_PATH = "updater_log.txt"
-CHECK_INTERVAL = 60  # seconds
+CHECK_INTERVAL = 60
 GITHUB_API = "https://api.github.com"
-INSTANCE_LOCK = os.path.join(tempfile.gettempdir(), "updater_running.lock")
 
-# Lightweight QSS and fonts (kept minimal for clarity)
 STYLE = """
-QWidget { background-color: rgba(22,27,34,0.88); color: #c9d1d9; font-family: 'Segoe UI', 'JetBrains Mono', monospace; }
-QLabel { color: #dbeafe; }
-QPushButton { background:#2ea043;color:white;border-radius:8px;padding:8px 12px; }
-QPushButton#flat { background:transparent;border:0;color:#c9d1d9; }
-.titlebar { background:transparent; }
+QWidget { background-color: #0d1117; color: #2ecc71; font-family: "Segoe UI"; }
+QPushButton { background-color: #2ecc71; color: white; border-radius: 6px; padding: 6px 12px; }
+QPushButton:hover { background-color: #27ae60; }
 """
 
-# Small inline SVG icons for system buttons (UWP-like minimal)
-SVG_MINIMIZE = """<svg viewBox="0 0 10 10" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="5" width="8" height="1" rx="0.3" fill="currentColor"/></svg>"""
-SVG_MAXIMIZE = """<svg viewBox="0 0 10 10" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="8" height="8" stroke="currentColor" fill="none" stroke-width="0.9" rx="0.7"/></svg>"""
-SVG_CLOSE = """<svg viewBox="0 0 10 10" xmlns="http://www.w3.org/2000/svg"><path d="M2 2 L8 8 M8 2 L2 8" stroke="currentColor" stroke-width="0.9" stroke-linecap="round"/></svg>"""
-
-# Utilities
 def log(msg):
-    ts = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-    try:
-        with open(LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(f"{ts} {msg}\n")
-    except Exception:
-        pass
-    print(f"{ts} {msg}")
+    timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+    with open(LOG_PATH, "a", encoding="utf-8") as f:
+        f.write(f"{timestamp} {msg}\n")
+    print(f"{timestamp} {msg}")
 
-def safe_parse_xml(text):
+def leer_xml(path):
     try:
-        root = ET.fromstring(text)
+        tree = ET.parse(path)
+        root = tree.getroot()
         return {
-            "app": (root.findtext("app") or "").strip(),
-            "version": (root.findtext("version") or "").strip(),
-            "platform": (root.findtext("platform") or "").strip(),
-            "author": (root.findtext("author") or "").strip()
+            "app": root.findtext("app", "").strip(),
+            "version": root.findtext("version", "").strip(),
+            "platform": root.findtext("platform", "").strip(),
+            "author": root.findtext("author", "").strip()
         }
     except Exception as e:
-        log(f"❌ XML parse error: {e}")
+        log(f"❌ Error leyendo XML: {e}")
         return {}
 
-def read_local_xml(path):
+def hay_conexion():
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            return safe_parse_xml(f.read())
+        requests.get(GITHUB_API, timeout=5)
+        return True
+    except:
+        return False
+
+def leer_xml_remoto(author, app):
+    url = f"https://raw.githubusercontent.com/{author}/{app}/main/details.xml"
+    try:
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200:
+            root = ET.fromstring(r.text)
+            return root.findtext("version", "").strip()
     except Exception as e:
-        log(f"❌ Error reading local XML: {e}")
-        return {}
+        log(f"❌ Error leyendo XML remoto: {e}")
+    return ""
 
-# Cross-platform rename of locked file best-effort
-def try_rename_inuse(fname):
-    for suffix in (".bak", ".old", ".waiting"):
-        bak = fname + suffix
-        try:
-            if os.path.exists(fname):
-                os.replace(fname, bak)
-                log(f"ℹ️ Renamed {fname} -> {bak}")
-                return True
-        except PermissionError:
-            continue
-        except Exception as e:
-            log(f"❌ rename error {fname}: {e}")
-            continue
-    return False
-
-def generate_installer(ruta_carpeta, url, nombre_zip, log_path):
-    """Generate platform-appropriate installer: .bat on Windows, .sh on *nix"""
-    batch_id = uuid.uuid4().hex[:8]
-    tmp = tempfile.gettempdir()
-    if os.name == "nt":
-        name = f"update_{batch_id}.bat"
-    else:
-        name = f"update_{batch_id}.sh"
-    path = os.path.join(tmp, name)
-    zip_full = os.path.join(ruta_carpeta, nombre_zip)
-    log_full = os.path.join(ruta_carpeta, log_path)
-    exe_to_launch = None
+def buscar_release(author, app, version, platform):
+    url = f"{GITHUB_API}/repos/{author}/{app}/releases/tags/{version}"
     try:
-        for f in os.listdir(ruta_carpeta):
-            if f.endswith(".exe") and f.lower() != os.path.basename(sys.argv[0]).lower():
-                exe_to_launch = f
-                break
-    except Exception:
-        pass
-
-    try:
-        if os.name == "nt":
-            lines = [
-                '@echo off',
-                f'cd /d "{ruta_carpeta}"',
-                f'echo [{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}] Starting update... >> "{log_full}"',
-                f'if exist "{zip_full}" del /f /q "{zip_full}"',
-                f'bitsadmin /transfer "UpdateJob" /download /priority normal "{url}" "{zip_full}" || powershell -Command "(New-Object System.Net.WebClient).DownloadFile(\'{url}\', \'{zip_full}\')"',
-                f'if exist "{zip_full}" (',
-                f'  powershell -Command "Expand-Archive -Path \\"{zip_full}\\" -DestinationPath \\"{ruta_carpeta}\\" -Force"',
-                f'  del /f /q "{zip_full}"',
-                f') else ( echo ERROR downloading >> "{log_full}" )',
-            ]
-            if exe_to_launch:
-                lines.append(f'start "" "{os.path.join(ruta_carpeta, exe_to_launch)}"')
-            lines.append('exit /b 0')
-        else:
-            lines = [
-                '#!/usr/bin/env bash',
-                f'cd "{ruta_carpeta}" || exit 1',
-                f'echo "[{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}] Starting update..." >> "{log_full}"',
-                f'rm -f "{zip_full}"',
-                f'curl -L -o "{zip_full}" "{url}" || wget -O "{zip_full}" "{url}" || true',
-                f'if [ -f "{zip_full}" ]; then',
-                f'  unzip -o "{zip_full}" -d "{ruta_carpeta}" || true',
-                f'  rm -f "{zip_full}"',
-                f'else',
-                f'  echo "ERROR downloading" >> "{log_full}"',
-                f'fi',
-            ]
-            if exe_to_launch:
-                lines.append(f'nohup "{os.path.join(ruta_carpeta, exe_to_launch)}" >/dev/null 2>&1 &')
-            lines.append('exit 0')
-        with open(path, "w", encoding="utf-8") as f:
-            f.write("\n".join(lines))
-        if os.name != "nt":
-            os.chmod(path, 0o755)
-        log(f"Installer generated at {path}")
-        return path
+        r = requests.get(url, timeout=10)
+        if r.status_code != 200:
+            log(f"❌ Release {version} no encontrado en {author}/{app}")
+            return None
+        assets = r.json().get("assets", [])
+        target = f"{app}-{version}-{platform}.iflapp"
+        for a in assets:
+            if a.get("name") == target:
+                return a.get("browser_download_url")
+        log("❌ Asset no encontrado en release.")
+        return None
     except Exception as e:
-        log(f"❌ generate_installer error: {e}")
+        log(f"❌ Error consultando GitHub API: {e}")
         return None
 
-# Background worker to poll GitHub and check updates (keeps UI responsive)
-class UpdateChecker(QThread):
-    update_found = pyqtSignal(str, str, str, str)  # app, version, platform, url
-    def __init__(self, xml_path=XML_PATH, interval=CHECK_INTERVAL, parent=None):
-        super().__init__(parent)
-        self.xml_path = xml_path
-        self.interval = max(5, int(interval))
-        self._stop = threading.Event()
-        # lightweight metrics to help diagnose network issues
-        self.metrics = {"checks": 0, "failures": 0, "last_response_ms": None}
-        # robust requests session with retries for transient network errors
-        self.session = requests.Session()
-        retries = Retry(total=3, backoff_factor=0.5, status_forcelist=(500, 502, 503, 504))
-        adapter = HTTPAdapter(max_retries=retries)
-        self.session.mount("https://", adapter)
-        self.session.mount("http://", adapter)
-        self.session.headers.update({"Accept": "application/vnd.github.v3+json", "User-Agent": "updater"})
+# --- CLASE INSTALLER WORKER INTEGRADA ---
+class InstallerWorker(QObject):
+    finished = pyqtSignal()
+    error = pyqtSignal(str)
+    progress = pyqtSignal(int)
+    
+    def __init__(self, url, app, platform):
+        super().__init__()
+        self.url = url
+        self.app = app
+        self.platform = platform
 
     def run(self):
-        while not self._stop.is_set():
-            try:
-                if not self._has_connection():
-                    self._emit_log("🌐 No network, waiting...")
-                    time.sleep(5)
-                    continue
-                datos = read_local_xml(self.xml_path)
-                if not datos or not datos.get("author"):
-                    self._emit_log("⚠️ Local XML missing or invalid.")
-                    time.sleep(self.interval)
-                    continue
-                self._emit_log(f"📖 {datos['app']} v{datos['version']} ({datos['platform']})")
-                remote_version = self._read_remote_version(datos["author"], datos["app"])
-                if remote_version and remote_version != datos["version"]:
-                    self._emit_log(f"🔄 Remote version {remote_version}")
-                    url = self._find_asset(datos["author"], datos["app"], remote_version, datos["platform"])
-                    if url:
-                        self.update_found.emit(datos["app"], remote_version, datos["platform"], url)
-                        return
-                    else:
-                        self._emit_log("❌ Asset not found for platform")
-                else:
-                    self._emit_log("ℹ️ No updates")
-            except Exception as e:
-                self._emit_log(f"❌ Checker error: {e}")
-            # sleep with early exit check
-            for _ in range(int(self.interval)):
-                if self._stop.is_set():
-                    break
-                time.sleep(1)
+        destino = "update.zip"
+        try:
+            log("🔐 Respaldando archivos…")
+            if not os.path.exists("backup_embestido"):
+                os.mkdir("backup_embestido")
+            
+            # Copiar solo archivos, excluyendo el directorio de backup y el archivo de destino
+            for f in os.listdir("."):
+                if f not in ["backup_embestido", destino] and os.path.isfile(f):
+                    shutil.copy2(f, f"backup_embestido/{f}")
+            log("✅ Respaldo completado.")
 
-    def stop(self):
-        """Signal the background checker thread to stop."""
-        self._stop.set()
+            log(f"⬇️ Descargando desde {self.url}")
+            r = requests.get(self.url, stream=True)
+            r.raise_for_status() # Lanza una excepción para códigos de estado HTTP erróneos
 
-    def _emit_log(self, msg):
-        """Internal logging helper for the checker (keeps signature used in run())."""
-        try:
-            self.metrics["checks"] = self.metrics.get("checks", 0) + 1
-        except Exception:
-            pass
-        log(msg)
+            total_size = int(r.headers.get('content-length', 0))
+            bytes_downloaded = 0
+            
+            with open(destino, "wb") as f:
+                for chunk in r.iter_content(8192):
+                    f.write(chunk)
+                    bytes_downloaded += len(chunk)
+                    if total_size > 0:
+                        percent = int((bytes_downloaded / total_size) * 100)
+                        self.progress.emit(percent)
+            
+            self.progress.emit(100) # Asegurar que el progreso llegue al 100%
+            log("✅ Descarga completada.")
 
-    def _has_connection(self):
-        try:
-    def _has_connection(self):
-        try:
-            # lightweight connectivity check
-            self.session.get(GITHUB_API, timeout=4)
-            return True
-        except Exception:
-            return False
-        url = f"{GITHUB_API}/repos/{author}/{app}/releases/tags/{version}"
-        try:
-            r = self.session.get(url, timeout=8)
-            if r.status_code != 200:
-                self._emit_log(f"❌ Release {version} not found")
-                return None
-            assets = r.json().get("assets", [])
-            target = f"{app}-{version}-{platform}.iflapp"
-            for a in assets:
-                if a.get("name") == target:
-                    return a.get("browser_download_url")
-            return None
+            log("📦 Descomprimiendo archivos…")
+            shutil.unpack_archive(destino, ".")
+            os.remove(destino)
+            log("✅ Archivos actualizados.")
+
+            # Lógica de reinicio
+            if not sys.argv[0].endswith(".py"):
+                exe = f"{self.app}.exe" if os.name == "nt" else f"./{self.app}"
+                if os.path.exists(exe):
+                    log(f"🚀 Ejecutando {exe}")
+                    subprocess.Popen(exe)
+            else:
+                log("🔁 Reiniciando script embestido...")
+                # El reinicio del script embestido es complejo en un worker,
+                # lo ideal es que el hilo principal se encargue de esto
+                # o que el worker sepa que debe terminar la aplicación actual.
+                # Por ahora, solo logueamos.
+                pass
+            
+            self.finished.emit()
+
         except Exception as e:
-            self._emit_log(f"❌ GitHub API error: {e}")
-            return None
+            log(f"❌ Error durante instalación: {e}")
+            log(traceback.format_exc())
+            self.error.emit(f"Error de instalación: {e}")
 
-# Platform-specific attempt to enable Windows blur (Mica/ Acrylic). Non-fatal if fails.
-def try_enable_windows_blur(win):
-    if os.name != "nt":
-        return
-    try:
-        import ctypes
-        from ctypes import wintypes
-        # Try DwmEnableBlurBehindWindow (classic blur behind) as a safe option:
-        dwm = ctypes.windll.dwmapi
-        class DWM_BLURBEHIND(ctypes.Structure):
-            _fields_ = [("dwFlags", wintypes.DWORD), ("fEnable", wintypes.BOOL),
-                        ("hRgnBlur", wintypes.HRGN), ("fTransitionOnMaximized", wintypes.BOOL)]
-        DWM_BB_ENABLE = 0x00000001
-        bb = DWM_BLURBEHIND()
-        bb.dwFlags = DWM_BB_ENABLE
-        bb.fEnable = True
-        bb.hRgnBlur = 0
-        bb.fTransitionOnMaximized = False
-        hwnd = wintypes.HWND(int(win.winId()))
-        dwm.DwmEnableBlurBehindWindow(hwnd, ctypes.byref(bb))
-    except Exception:
-        log("ℹ️ Windows blur not available or failed (non-fatal)")
+# --- FIN CLASE INSTALLER WORKER INTEGRADA ---
 
-# Helper to convert small SVG string to QIcon
-def svg_to_icon(svg_str, size=16, color="#c9d1d9"):
-    pix = QPixmap(size, size)
-    pix.fill(Qt.transparent)
-    from PyQt5.QtSvg import QSvgRenderer
-    renderer = QSvgRenderer(bytes(svg_str.replace("currentColor", color), "utf-8"))
-    painter = QPainter(pix)
-    renderer.render(painter)
-    painter.end()
-    return QIcon(pix)
-
-# Custom frameless window with titlebar and system buttons, acrylic-like background
 class UpdaterWindow(QWidget):
-    def __init__(self, appname, version, platform, url):
-        super().__init__(flags=Qt.Window)
-        self.appname = appname
+    update_finished = pyqtSignal() # Señal para manejar el cierre de la ventana después de la actualización
+
+    def __init__(self, app, version, platform, url):
+        super().__init__()
+        self.app = app
         self.version = version
         self.platform = platform
         self.url = url
-        self.setWindowTitle(f"Updater - {appname}")
-        self.setFixedSize(560, 320)
-        self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        
+        # Eliminar el borde nativo y permitir transparencia
+        self.setWindowFlags(Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setStyleSheet(STYLE)
-        try_enable_windows_blur(self)
-        self._drag_pos = None
-        self.init_ui()
 
-    def paintEvent(self, e):
-        super().paintEvent(e)
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        r = self.rect().adjusted(0, 0, -1, -1)
-        p.setBrush(QBrush(QColor(22, 27, 34, 220)))
-        p.setPen(Qt.NoPen)
-        p.drawRoundedRect(r, 14, 14)
+        self.setWindowTitle("Actualizador de Flarm App")
+        self.setFixedSize(460, 280) # Aumentar un poco el tamaño para el title bar
+        self.setStyleSheet(STYLE)
+        self.init_ui()
+        
+        # Variables para el arrastre de la ventana
+        self._start_pos = None
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._start_pos = event.pos()
+
+    def mouseMoveEvent(self, event):
+        if self._start_pos is not None and event.buttons() == Qt.LeftButton:
+            self.move(self.pos() + event.pos() - self._start_pos)
+
+    def mouseReleaseEvent(self, event):
+        self._start_pos = None
 
     def init_ui(self):
-        main = QVBoxLayout(self)
-        main.setContentsMargins(12, 12, 12, 12)
-        main.setSpacing(8)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0) # Eliminar márgenes del layout principal
 
-        # Title bar
-        titlebar = QFrame(self)
-        titlebar.setObjectName("titlebar")
-        tb_layout = QHBoxLayout(titlebar)
-        tb_layout.setContentsMargins(8, 6, 8, 6)
-        tb_layout.setSpacing(6)
-        title = QLabel(f"{self.appname} — Actualizador", self)
-        title.setFont(QFont("Segoe UI", 11))
-        title.setStyleSheet("color:#e6eef8;")
-        tb_layout.addWidget(title)
-        tb_layout.addStretch()
+        # --- Title Bar (Custom) ---
+        self.title_bar = QWidget()
+        self.title_bar.setFixedHeight(40)
+        self.title_bar.setStyleSheet("background-color: #161b22;") # Un color ligeramente diferente para el title bar
+        title_layout = QHBoxLayout(self.title_bar)
+        title_layout.setContentsMargins(10, 0, 0, 0)
+        title_layout.setSpacing(0)
 
-        btn_min = QPushButton()
-        btn_max = QPushButton()
-        btn_close = QPushButton()
-        btn_min.setObjectName("flat"); btn_max.setObjectName("flat"); btn_close.setObjectName("flat")
-        btn_min.setIcon(svg_to_icon(SVG_MINIMIZE, 12))
-        btn_max.setIcon(svg_to_icon(SVG_MAXIMIZE, 12))
-        btn_close.setIcon(svg_to_icon(SVG_CLOSE, 12, color="#ff6b6b"))
-        btn_min.setFixedSize(36, 24); btn_max.setFixedSize(36, 24); btn_close.setFixedSize(36, 24)
-        btn_min.clicked.connect(self.showMinimized)
-        btn_max.clicked.connect(self.toggle_max_restore)
-        btn_close.clicked.connect(self.close)
-        tb_layout.addWidget(btn_min); tb_layout.addWidget(btn_max); tb_layout.addWidget(btn_close)
-        main.addWidget(titlebar)
+        title_label = QLabel("Flarm Updater")
+        title_label.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        title_layout.addWidget(title_label)
+        title_layout.addStretch()
 
-        # Body
-        body = QVBoxLayout()
-        body.setSpacing(10)
-        lbl = QLabel(f"v{self.version} ({self.platform})")
-        lbl.setFont(QFont("JetBrains Mono", 12))
-        lbl.setStyleSheet("color:#9ad1ff")
-        lbl.setAlignment(Qt.AlignCenter)
-        body.addWidget(lbl)
-        info = QLabel("Hay una actualización disponible. ¿Deseas actualizar ahora?\nSe generará un instalador seguro y automático.")
-        info.setWordWrap(True)
-        info.setAlignment(Qt.AlignCenter)
-        body.addWidget(info)
+        # Botones de control (con iconos SVG)
+        self.btn_minimize = QPushButton()
+        self.btn_close = QPushButton()
+        
+        # Cargar iconos SVG (usando QPixmap para SVG)
+        # Se asume que los archivos SVG están en el mismo directorio
+        min_pm = os.path.join("assets", "min.svg")
+        close_pm = os.path.join("assets", "close.svg")
+        minimize_pixmap = QPixmap(min_pm)
+        close_pixmap = QPixmap(close_pm)
+        
+        self.btn_minimize.setIcon(QIcon(minimize_pixmap))
+        self.btn_close.setIcon(QIcon(close_pixmap))
+        
+        self.btn_minimize.setFixedSize(40, 40)
+        self.btn_close.setFixedSize(40, 40)
+        
+        # Estilos para los botones (solo hover)
+        self.btn_minimize.setStyleSheet("QPushButton { border: none; background-color: transparent; } QPushButton:hover { background-color: #30363d; }")
+        self.btn_close.setStyleSheet("QPushButton { border: none; background-color: transparent; } QPushButton:hover { background-color: #e81123; }")
 
-        btns = QHBoxLayout()
-        btn_cancel = QPushButton("Cancelar")
-        btn_python = QPushButton("Actualizar (Python)")
-        btn_batch = QPushButton("Actualizar (Rápido)")
-        btns.addStretch()
-        btns.addWidget(btn_cancel); btns.addWidget(btn_python); btns.addWidget(btn_batch); btns.addStretch()
-        btn_cancel.clicked.connect(self.close)
-        btn_python.clicked.connect(self.install_python)
-        btn_batch.clicked.connect(self.install_batch)
+        self.btn_minimize.clicked.connect(self.showMinimized)
+        self.btn_close.clicked.connect(self.close)
 
-        body.addLayout(btns)
-        main.addLayout(body)
+        title_layout.addWidget(self.btn_minimize)
+        title_layout.addWidget(self.btn_close)
+        
+        main_layout.addWidget(self.title_bar)
 
-    def mousePressEvent(self, ev):
-        if ev.button() == Qt.LeftButton:
-            self._drag_pos = ev.globalPos() - self.frameGeometry().topLeft()
-            ev.accept()
+        # --- Content Area ---
+        content_widget = QWidget()
+        layout = QVBoxLayout(content_widget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        title = QLabel("Flarm Updater")
+        title.setFont(QFont("Segoe UI", 16, QFont.Bold))
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
 
-    def mouseMoveEvent(self, ev):
-        if self._drag_pos and ev.buttons() & Qt.LeftButton:
-            self.move(ev.globalPos() - self._drag_pos)
-            ev.accept()
+        info = QLabel(f"📦 {self.app}\n🔄 Nueva versión: {self.version}\n🖥️ Plataforma: {self.platform}")
+        info.setFont(QFont("Segoe UI", 12))
+        layout.addWidget(info)
 
-    def toggle_max_restore(self):
-        if self.isMaximized():
-            self.showNormal()
-        else:
-            self.showMaximized()
+        self.progress_label = QLabel("Listo para actualizar.")
+        self.progress_label.setFont(QFont("Roboto", 10))
+        layout.addWidget(self.progress_label)
 
-    def show_permission_error(self, fn):
-        msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Critical)
-        msg.setWindowTitle("Permiso Denegado")
-        msg.setText(f"No se pudo actualizar el archivo: {fn}\nCierra la aplicación objetivo o ejecuta como administrador.")
-        msg.exec_()
+        self.btn = QPushButton("Actualizar ahora")
+        self.btn.clicked.connect(self.instalar)
+        layout.addWidget(self.btn)
 
-    def install_python(self):
-        # Simple, safe python fallback (runs in background thread)
-        t = threading.Thread(target=self._install_python_worker, daemon=True)
-        t.start()
-        QMessageBox.information(self, "Instalación iniciada", "La instalación mediante Python se está ejecutando en segundo plano. Revisa el log.")
-        self.close()
+        main_layout.addWidget(content_widget)
+        self.show()
+        self.update_finished.connect(self.close) # Conectar la señal de finalización al cierre de la ventana
 
-    def _install_python_worker(self):
-        destino = "update.zip"
-        try:
-            log("🔐 Backing up files")
-            bakdir = "backup_embestido"
-            os.makedirs(bakdir, exist_ok=True)
-            for f in os.listdir("."):
-                if f in (bakdir, destino):
-                    continue
-                if os.path.isfile(f):
-                    try:
-                        shutil.copy2(f, os.path.join(bakdir, f))
-                    except Exception as e:
-                        log(f"⚠️ backup {f}: {e}")
-            log(f"⬇️ Downloading {self.url}")
-            with requests.get(self.url, stream=True, timeout=30) as r:
-                r.raise_for_status()
-                with open(destino, "wb") as out:
-                    for chunk in r.iter_content(8192):
-                        if chunk:
-                            out.write(chunk)
-            try:
-                shutil.unpack_archive(destino, ".")
-            except PermissionError as ex:
-                fn = getattr(ex, "filename", "") or ""
-                log(f"🔀 PermissionError unpacking, trying rename: {fn}")
-                if fn and try_rename_inuse(fn):
-                    try:
-                        shutil.unpack_archive(destino, ".")
-                    except Exception as again:
-                        log(f"❌ final unpack error: {again}")
-                        self.show_permission_error(fn)
-                        return
-                else:
-                    self.show_permission_error(fn or "(unknown)")
+    def instalar(self):
+        self.btn.setEnabled(False)
+        self.progress_label.setText("Iniciando descarga...")
+
+        self.thread = QThread()
+        self.worker = InstallerWorker(self.url, self.app, self.platform)
+        self.worker.moveToThread(self.thread)
+
+        self.thread.started.connect(self.worker.run)
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.worker.finished.connect(self.on_update_finished)
+        self.thread.finished.connect(self.thread.deleteLater)
+        self.worker.error.connect(self.on_error)
+        self.worker.progress.connect(self.on_progress)
+
+        self.thread.start()
+
+    def on_progress(self, percent):
+        self.progress_label.setText(f"Descargando... {percent}%")
+
+    def on_error(self, message):
+        self.progress_label.setText(f"ERROR: {message}")
+        self.btn.setEnabled(True)
+        # Aquí se podría añadir un QMessageBox para notificar al usuario
+        # Cerrar la ventana en caso de error grave
+        self.update_finished.emit()
+
+    def on_update_finished(self):
+        self.progress_label.setText("Actualización completada. Reiniciando...")
+        # Emitir la señal para cerrar la ventana, lo que debe ocurrir después de que el worker haya terminado
+        self.update_finished.emit()
+
+def ciclo_embestido():
+    def verificar():
+        while True:
+            if not hay_conexion():
+                log("🌐 Sin conexión. Esperando...")
+                time.sleep(30)
+                continue
+
+            datos = leer_xml(XML_PATH)
+            if not datos:
+                time.sleep(CHECK_INTERVAL)
+                continue
+
+            log(f"📖 App: {datos['app']} | Versión local: {datos['version']} | Plataforma: {datos['platform']}")
+            remoto = leer_xml_remoto(datos["author"], datos["app"])
+            if remoto and remoto != datos["version"]:
+                log(f"🔄 Nueva versión remota: {remoto}")
+                url = buscar_release(datos["author"], datos["app"], remoto, datos["platform"])
+                if url:
+                    log("✅ Actualización encontrada.")
+                    app = QApplication(sys.argv)
+                    ventana = UpdaterWindow(datos["app"], remoto, datos["platform"], url)
+                    app.exec_()
                     return
-            except Exception as e:
-                log(f"❌ unpack failed: {e}")
-                return
-            try:
-                os.remove(destino)
-            except Exception:
-                pass
-            # Relaunch if app binary present
-            exe = f"{self.appname}.exe" if os.name == "nt" else f"./{self.appname}"
-            if os.path.exists(exe):
-                try:
-                    subprocess.Popen([exe], cwd=os.path.abspath(os.path.dirname(__file__)))
-                except Exception:
-                    pass
-            log("✅ Python install finished.")
-        except Exception as e:
-            log(f"❌ install_python error: {e}\n{traceback.format_exc()}")
-
-            log(f"Launching installer: {script}")
-            if os.name == "nt":
-                os.startfile(script)
+                else:
+                    log("❌ No se encontró asset para la plataforma.")
             else:
-                # ensure we invoke the script directly (it is created executable on non-NT)
-                try:
-                    subprocess.Popen([script])
-                except Exception:
-        except Exception as e:
-            log(f"❌ install_python error: {e}\n{traceback.format_exc()}")
-            # Inform the user and stop this worker; do not reference undefined variables.
-            try:
-                QMessageBox.warning(self, "Error de instalación", "La instalación automática falló. Consulta el log para más detalles.")
-            except Exception:
-                pass
-            return
-                        log("🛑 Another updater instance running.")
-                        return
-                    except OSError:
-                        # stale lock, remove it
-                        log("⚠️ Stale instance lock found and will be removed.")
-                        try:
-                            os.remove(INSTANCE_LOCK)
-                        except Exception:
-def main():
-    # Acquire simple PID lock to avoid multiple instances (tries to clear stale locks)
-    try:
-        if os.path.exists(INSTANCE_LOCK):
-            try:
-                with open(INSTANCE_LOCK, "r", encoding="utf-8") as f:
-                    content = f.read().strip()
-                    pid = int(content or "0")
-                if pid > 0:
-                    try:
-                        # signal 0 does not kill; it raises if process does not exist (works on Unix and Windows)
-                        os.kill(pid, 0)
-                        log("🛑 Another updater instance running.")
-                        return
-                    except OSError:
-                        # stale lock, remove it
-                        log("⚠️ Stale instance lock found and will be removed.")
-                        try:
-                            os.remove(INSTANCE_LOCK)
-                        except Exception:
-                            pass
-            except Exception:
-                # corrupted lock file, remove and continue
-                try:
-                    os.remove(INSTANCE_LOCK)
-                except Exception:
-                    pass
-        try:
-            with open(INSTANCE_LOCK, "w", encoding="utf-8") as f:
-                f.write(str(os.getpid()))
-        except Exception as e:
-            log(f"❌ Could not create instance lock: {e}")
-            return
-
-        log("Updater started.")
-        # Start Qt app and background checker
-        app = QApplication(sys.argv)
-        checker = UpdateChecker()
-        # If update found, show UI on main thread
-        def on_update(appname, version, platform, url):
-            win = UpdaterWindow(appname, version, platform, url)
-            win.show()
-
-        checker.update_found.connect(on_update)
-        checker.start()
-        try:
-            sys.exit(app.exec_())
-        finally:
-            # Ensure checker stops and lock is removed on exit
-            try:
-                checker.stop()
-                checker.wait(2000)
-            except Exception:
-                pass
-            try:
-                if os.path.exists(INSTANCE_LOCK):
-                    os.remove(INSTANCE_LOCK)
-            except Exception:
-                pass
+                log("ℹ️ No hay actualizaciones.")
+            time.sleep(CHECK_INTERVAL)
+    threading.Thread(target=verificar, daemon=True).start()
 
 if __name__ == "__main__":
-    main()
+    log("🕶️ Actualizador IPM iniciado en modo silencioso.")
+    ciclo_embestido()
+    while True:
+        time.sleep(3600)
