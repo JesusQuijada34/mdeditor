@@ -31,7 +31,7 @@ class MarkdownEditor(QMainWindow):
         self.central_layout.setSpacing(0)
 
         # Custom Title/Bar
-        title_bar = QLabel("✨ Editor Markdown Avanzado ✨", alignment=Qt.AlignCenter)
+        title_bar = QLabel("✨ Editor Markdown ✨", alignment=Qt.AlignCenter)
         title_bar.setStyleSheet("font-family: 'Segoe UI'; font-size: 32px; font-weight: bold; color: #fff; background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #67119a, stop:1 #18d6b4); padding: 20px 0; border-bottom-left-radius: 30px; border-bottom-right-radius: 30px;")
         self.central_layout.addWidget(title_bar)
 
@@ -301,10 +301,10 @@ class MarkdownEditor(QMainWindow):
     def about(self):
         QMessageBox.about(
             self, "Acerca del Editor Markdown",
-            "<h2 style='color:#18d6b4;'>Editor Markdown Avanzado</h2>"
+            "<h2 style='color:#18d6b4;'>Editor Markdown</h2>"
             "<p>Un editor de texto bello, moderno y multiplataforma con soporte para Markdown y vista previa estilizada.</p>"
-            "<p><b>Versión:</b> 2.0 Superbeauty</p>"
-            "<p>Hecho con 🧡 y <b>PyQt5</b></p>"
+            "<p><b>Versión:</b> v2.0-25.11-18.48 UltraGlitter</p>"
+            "<p>Hecho por <b>JESUS QUIJADA (JESUSQUIJADA34)</b></p>"
         )
 
     def closeEvent(self, event):
