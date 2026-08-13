@@ -1,4 +1,3 @@
-# Dependencias del paquete
-PyQt5==5.15.9
-markdown==3.4.1
-pyqt5-tools==5.15.9.3.3  # Opcional (para herramientas adicionales)
+# Dependencias de Markdown Editor
+PyQt6>=6.5,<7
+Markdown>=3.4,<4

@@ -1,1 +1,13 @@
-<app><publisher>Influent</publisher><app>mdeditor</app><name>MarkDown Editor</name><version>v2.0-25.11-18.48</version><correlationid>72f2394f46d4b5deb58026989ff28ca41c8920ee94e3f944cfeb9a2c3346bf60</correlationid><rate>PERSONAL USE</rate><author>JesusQuijada34</author><platform>AlphaCube</platform></app>
+<?xml version="1.0" encoding="UTF-8"?>
+<app>
+  <publisher>Influent</publisher>
+  <app>mdeditor</app>
+  <name>MarkDown Editor</name>
+  <version>v2.0-26.08-15.09-AlphaCube</version>
+  <correlationid>fb57b8532c155b0e17a2269b1331ae1d7009bba78a0c333068dc06c9b06472ec</correlationid>
+  <rate>Todas las edades</rate>
+  <author>JesusQuijada34</author>
+  <platform>AlphaCube</platform>
+  <description>Proyecto reparado por MoonFix</description>
+  <year>2026</year>
+</app>

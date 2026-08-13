@@ -1,13 +1,13 @@
 import sys
 import os
 import markdown
-from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QTextEdit, QAction, QFileDialog,
-    QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QTextEdit, QFileDialog,
+    QMessageBox, QDialog, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel
 )
-from PyQt5.QtGui import QTextCursor, QFont, QTextCharFormat, QIcon, QColor, QPalette
-from PyQt5.QtCore import Qt, QSize
-from PyQt5.QtPrintSupport import QPrintDialog, QPrinter
+from PyQt6.QtGui import QAction, QTextCursor, QFont, QTextCharFormat, QIcon, QColor, QPalette
+from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtPrintSupport import QPrintDialog, QPrinter
 
 class MarkdownEditor(QMainWindow):
     def __init__(self):
@@ -31,7 +31,7 @@ class MarkdownEditor(QMainWindow):
         self.central_layout.setSpacing(0)
 
         # Custom Title/Bar
-        title_bar = QLabel("✨ Editor Markdown ✨", alignment=Qt.AlignCenter)
+        title_bar = QLabel("✨ Editor Markdown ✨", alignment=Qt.AlignmentFlag.AlignCenter)
         title_bar.setStyleSheet("font-family: 'Segoe UI'; font-size: 32px; font-weight: bold; color: #fff; background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #67119a, stop:1 #18d6b4); padding: 20px 0; border-bottom-left-radius: 30px; border-bottom-right-radius: 30px;")
         self.central_layout.addWidget(title_bar)
 
@@ -229,11 +229,11 @@ class MarkdownEditor(QMainWindow):
             reply = QMessageBox.question(
                 self, "Documento no guardado",
                 "¿Desea guardar los cambios antes de crear un nuevo documento?",
-                QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel
+                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel
             )
-            if reply == QMessageBox.Save:
+            if reply == QMessageBox.StandardButton.Save:
                 self.save_file()
-            elif reply == QMessageBox.Cancel:
+            elif reply == QMessageBox.StandardButton.Cancel:
                 return
         self.editor.clear()
         self.current_file = None
@@ -246,11 +246,11 @@ class MarkdownEditor(QMainWindow):
             reply = QMessageBox.question(
                 self, "Documento no guardado",
                 "¿Desea guardar los cambios antes de abrir otro documento?",
-                QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel
+                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel
             )
-            if reply == QMessageBox.Save:
+            if reply == QMessageBox.StandardButton.Save:
                 self.save_file()
-            elif reply == QMessageBox.Cancel:
+            elif reply == QMessageBox.StandardButton.Cancel:
                 return
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Abrir archivo", "",
@@ -294,7 +294,7 @@ class MarkdownEditor(QMainWindow):
     def print_file(self):
         printer = QPrinter()
         dialog = QPrintDialog(printer, self)
-        if dialog.exec_() == QPrintDialog.Accepted:
+        if dialog.exec() == QDialog.DialogCode.Accepted:
             self.editor.print_(printer)
 
     # --- About Dialog ---
@@ -303,7 +303,7 @@ class MarkdownEditor(QMainWindow):
             self, "Acerca del Editor Markdown",
             "<h2 style='color:#18d6b4;'>Editor Markdown</h2>"
             "<p>Un editor de texto bello, moderno y multiplataforma con soporte para Markdown y vista previa estilizada.</p>"
-            "<p><b>Versión:</b> v2.0-25.11-18.48 UltraGlitter</p>"
+            "<p><b>Versión:</b> v2.0-26.08-15.04-AlphaCube</p>"
             "<p>Hecho por <b>JESUS QUIJADA (JESUSQUIJADA34)</b></p>"
         )
 
@@ -312,13 +312,13 @@ class MarkdownEditor(QMainWindow):
             reply = QMessageBox.question(
                 self, "Documento no guardado",
                 "¿Desea guardar los cambios antes de salir?",
-                QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel
+                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel
             )
 
-            if reply == QMessageBox.Save:
+            if reply == QMessageBox.StandardButton.Save:
                 self.save_file()
                 event.accept()
-            elif reply == QMessageBox.Discard:
+            elif reply == QMessageBox.StandardButton.Discard:
                 event.accept()
             else:
                 event.ignore()
@@ -329,4 +329,4 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     editor = MarkdownEditor()
     editor.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
