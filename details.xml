@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <app>
-  <publisher>Influent</publisher>
+  <publisher>influent</publisher>
   <app>mdeditor</app>
   <name>MarkDown Editor</name>
-  <version>v2.0-26.08-21.56-AlphaCube</version>
-  <correlationid>ff7820de4da6ce8d087ac8000a6f54a34268fb3050ab75b6500d59c87a056798</correlationid>
+  <version>v2.0-26.08-21.56</version>
+  <correlationid>72afd8b3eb0e3b38a9946ee163a8be76ee08b664b4fec7fd639c154753cd13c3</correlationid>
   <rate>Todas las edades</rate>
   <author>JesusQuijada34</author>
   <platform>AlphaCube</platform>
